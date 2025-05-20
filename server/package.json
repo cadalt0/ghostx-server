@@ -2,10 +2,11 @@
   "name": "ghosttx-server",
   "version": "1.0.0",
   "description": "GhostTx Server",
-  "main": "index.ts",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "ts-node index.ts",
+    "start": "node dist/index.js",
     "build": "tsc",
+    "postinstall": "npm run build",
     "dev": "ts-node-dev --respawn index.ts"
   },
   "dependencies": {

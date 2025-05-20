@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3001; // Heroku will set PORT automatically
 
 // Middleware
 app.use(cors());
@@ -137,6 +137,6 @@ pool.on('error', (err, client) => {
 // Start server
 initializeDatabase().then(() => {
   app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+    console.log(`Server running on port ${port}`);
   });
 }); 
