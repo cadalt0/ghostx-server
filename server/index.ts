@@ -60,47 +60,40 @@ app.post('/api/save-code', async (req: Request<{}, {}, SaveCodeRequest>, res: Re
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Check if wallet exists
-    const walletExists = await client.query(
-      'SELECT * FROM wallet_addresses WHERE wallet_address = $1',
-      [walletAddress]
-    );
-
-    if (walletExists.rows.length === 0) {
-      // Create new wallet entry
-      await client.query(
-        'INSERT INTO wallet_addresses (wallet_address, codes) VALUES ($1, $2)',
-        [walletAddress, JSON.stringify({
-          [code]: {
-            value: code,
-            created_at: new Date().toISOString(),
-            is_used: false,
-            amount: amount
-          }
-        })]
-      );
-    } else {
-      // Update existing wallet's codes
-      const currentCodes = walletExists.rows[0].codes || {};
-      currentCodes[code] = {
+    // Single query using upsert
+    await client.query(`
+      INSERT INTO wallet_addresses (wallet_address, codes)
+      VALUES ($1, $2)
+      ON CONFLICT (wallet_address) DO UPDATE
+      SET codes = jsonb_set(
+        COALESCE(wallet_addresses.codes, '{}'::jsonb),
+        $3::text[],
+        $4::jsonb
+      )
+    `, [
+      walletAddress,
+      JSON.stringify({
+        [code]: {
+          value: code,
+          created_at: new Date().toISOString(),
+          is_used: false,
+          amount: amount
+        }
+      }),
+      `{${code}}`,
+      JSON.stringify({
         value: code,
         created_at: new Date().toISOString(),
         is_used: false,
         amount: amount
-      };
-
-      await client.query(
-        'UPDATE wallet_addresses SET codes = $1 WHERE wallet_address = $2',
-        [JSON.stringify(currentCodes), walletAddress]
-      );
-    }
+      })
+    ]);
 
     res.json({ success: true });
   } catch (error) {
     console.error('Error saving code:', error);
     res.status(500).json({ error: 'Failed to save code' });
   } finally {
-    // Always release the client back to the pool
     client.release();
   }
 });
