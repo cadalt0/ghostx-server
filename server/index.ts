@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import { Pool } from 'pg';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import fetch from 'node-fetch';
+import fetch, { Response as FetchResponse } from 'node-fetch';
 
 // Load environment variables
 dotenv.config();
@@ -32,6 +32,17 @@ interface TxStats {
   totalTx: number;
   last24hTx: number;
   lastUpdated: number;
+}
+
+interface SignatureResponse {
+  signature: string;
+  blockTime: number;
+}
+
+interface HeliusResponse {
+  jsonrpc: string;
+  id: number;
+  result: SignatureResponse[];
 }
 
 let cachedStats: TxStats = {
@@ -73,12 +84,12 @@ interface SaveCodeRequest {
 
 // Transaction Stats Functions
 async function fetchTxStats() {
-  let allSignatures: { signature: string, blockTime: number }[] = [];
+  let allSignatures: SignatureResponse[] = [];
   let before: string | undefined = undefined;
   let keepFetching = true;
   
   while (keepFetching) {
-    const sigRes = await fetch(HELIUS_RPC_URL, {
+    const sigRes: FetchResponse = await fetch(HELIUS_RPC_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -88,9 +99,9 @@ async function fetchTxStats() {
         params: before ? [PDA_ADDRESS, { limit: 100, before }] : [PDA_ADDRESS, { limit: 100 }],
       }),
     });
-    const sigData = await sigRes.json();
-    const batch = sigData.result || [];
-    allSignatures = allSignatures.concat(batch.map((s: any) => ({ signature: s.signature, blockTime: s.blockTime })));
+    const sigData: HeliusResponse = await sigRes.json();
+    const batch: SignatureResponse[] = sigData.result || [];
+    allSignatures = allSignatures.concat(batch);
     if (batch.length === 100) {
       before = batch[batch.length - 1].signature;
     } else {
@@ -168,7 +179,7 @@ app.get('/api/get-codes/:walletAddress', async (req: Request<{ walletAddress: st
 });
 
 // Transaction stats API
-app.get('/api/tx-stats', (_req, res) => {
+app.get('/api/tx-stats', (_req: Request, res: Response) => {
   res.json(cachedStats);
 });
 
