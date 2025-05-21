@@ -24,7 +24,7 @@ const pool = new Pool({
 });
 
 // Transaction Stats Configuration
-const PDA_ADDRESS = "2pf7Zx4PitoVB5rJZvGvm2jxKVH8A68uA5StujXdkiP3";
+const PDA_ADDRESS = "8KYeVB9iPLgy3h33BQAwUJCTWc1hvzrcpvMxSNjTXnFf";
 const HELIUS_API_KEY = process.env.NEXT_PUBLIC_HELIUS_API_KEY;
 const HELIUS_RPC_URL = `https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 
