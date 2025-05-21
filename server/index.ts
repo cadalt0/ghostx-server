@@ -7,40 +7,43 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3001; // Heroku will set PORT automatically
+const port = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Create a connection pool
+// PostgreSQL pool setup
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || process.env.DB_CONNECTION_STRING,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 20, // Maximum number of clients in the pool
-  idleTimeoutMillis: 30000, // How long a client is allowed to remain idle before being closed
-  connectionTimeoutMillis: 2000, // How long to wait for a connection
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
 });
 
-// Initialize database
+// Initialize DB table
 async function initializeDatabase() {
+  const client = await pool.connect();
   try {
-    // Test the connection
-    const client = await pool.connect();
     console.log('✅ Connected to the database.');
 
     await client.query(`
-      CREATE TABLE IF NOT EXISTS wallet_addresses (
-        wallet_address TEXT PRIMARY KEY,
-        codes JSONB DEFAULT '{}'::jsonb
+      CREATE TABLE IF NOT EXISTS wallet_codes (
+        wallet_address TEXT NOT NULL,
+        code TEXT NOT NULL,
+        amount NUMERIC NOT NULL,
+        is_used BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (wallet_address, code)
       );
     `);
-    console.log('✅ Table ensured.');
 
-    // Release the client back to the pool
-    client.release();
+    console.log('✅ Table "wallet_codes" ensured.');
   } catch (err) {
-    console.error('❌ Error:', err);
+    console.error('❌ Error initializing database:', err);
+  } finally {
+    client.release();
   }
 }
 
@@ -50,86 +53,70 @@ interface SaveCodeRequest {
   amount: number;
 }
 
-// API Routes
+// Save code API
 app.post('/api/save-code', async (req: Request<{}, {}, SaveCodeRequest>, res: Response) => {
+  const { walletAddress, code, amount } = req.body;
+
+  if (!walletAddress || !code || amount === undefined) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
   const client = await pool.connect();
   try {
-    const { walletAddress, code, amount } = req.body;
-
-    if (!walletAddress || !code || amount === undefined) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    // Single query using upsert
     await client.query(`
-      INSERT INTO wallet_addresses (wallet_address, codes)
-      VALUES ($1, $2)
-      ON CONFLICT (wallet_address) DO UPDATE
-      SET codes = jsonb_set(
-        COALESCE(wallet_addresses.codes, '{}'::jsonb),
-        $3::text[],
-        $4::jsonb
-      )
-    `, [
-      walletAddress,
-      JSON.stringify({
-        [code]: {
-          value: code,
-          created_at: new Date().toISOString(),
-          is_used: false,
-          amount: amount
-        }
-      }),
-      `{${code}}`,
-      JSON.stringify({
-        value: code,
-        created_at: new Date().toISOString(),
-        is_used: false,
-        amount: amount
-      })
-    ]);
+      INSERT INTO wallet_codes (wallet_address, code, amount, is_used, created_at)
+      VALUES ($1, $2, $3, false, NOW())
+      ON CONFLICT (wallet_address, code)
+      DO UPDATE SET amount = EXCLUDED.amount, is_used = false, created_at = NOW();
+    `, [walletAddress, code, amount]);
 
     res.json({ success: true });
-  } catch (error) {
-    console.error('Error saving code:', error);
+  } catch (err) {
+    console.error('❌ Error saving code:', err);
     res.status(500).json({ error: 'Failed to save code' });
   } finally {
     client.release();
   }
 });
 
+// Get codes by wallet address
 app.get('/api/get-codes/:walletAddress', async (req: Request<{ walletAddress: string }>, res: Response) => {
+  const { walletAddress } = req.params;
+
   const client = await pool.connect();
   try {
-    const { walletAddress } = req.params;
-    
     const result = await client.query(
-      'SELECT codes FROM wallet_addresses WHERE wallet_address = $1',
+      `SELECT code, amount, is_used, created_at FROM wallet_codes WHERE wallet_address = $1`,
       [walletAddress]
     );
 
-    if (result.rows.length === 0) {
-      return res.json({ codes: {} });
-    }
+    const codes: Record<string, any> = {};
+    result.rows.forEach(row => {
+      codes[row.code] = {
+        value: row.code,
+        amount: parseFloat(row.amount),
+        is_used: row.is_used,
+        created_at: row.created_at
+      };
+    });
 
-    res.json({ codes: result.rows[0].codes });
-  } catch (error) {
-    console.error('Error getting codes:', error);
+    res.json({ codes });
+  } catch (err) {
+    console.error('❌ Error getting codes:', err);
     res.status(500).json({ error: 'Failed to get codes' });
   } finally {
-    // Always release the client back to the pool
     client.release();
   }
 });
 
-// Handle pool errors
-pool.on('error', (err, client) => {
+// Pool error handler
+pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
 });
 
 // Start server
 initializeDatabase().then(() => {
   app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+    console.log(`🚀 Server running on port ${port}`);
   });
-}); 
+});
